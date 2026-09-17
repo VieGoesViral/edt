@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Récupère l'emploi du temps HyperPlanning d'Avignon Université (tous les
-événements, sans filtrage), convertit les horaires UTC du flux source en
-heure locale Europe/Paris explicite (TZID), simplifie les titres, puis
-écrit un fichier .ics propre dans docs/ (servi ensuite par GitHub Pages).
+Filtre l'emploi du temps HyperPlanning d'Avignon Université : télécharge
+le flux ICS, retire les événements "Réservation de salles" (doublons
+administratifs de réservation de salle, distincts des vrais cours),
+convertit les horaires UTC du flux source en heure locale Europe/Paris
+explicite (TZID), simplifie les titres, puis écrit un fichier .ics propre
+dans docs/ (servi ensuite par GitHub Pages).
 
 Utilisation :
     EDT_URL="https://edt-api.univ-avignon.fr/..." python3 edt_filtre.py
@@ -20,7 +22,26 @@ from icalendar import Calendar, Timezone, TimezoneStandard, TimezoneDaylight, vR
 URL = os.environ["EDT_URL"]
 OUTPUT_FILE = "docs/edt_filtre.ics"
 FUSEAU = ZoneInfo("Europe/Paris")
+
+# Motifs à exclure du résumé (SUMMARY), en minuscules
+MOTS_A_EXCLURE = ["reservation de salles", "réservation de salles"]
 # ---------------------------------------------------------------------
+
+
+def normaliser(texte: str) -> str:
+    """Minuscule + retire les accents simples pour comparer sans piège."""
+    remplacements = {
+        "é": "e", "è": "e", "ê": "e", "ë": "e",
+        "à": "a", "â": "a",
+        "î": "i", "ï": "i",
+        "ô": "o",
+        "ù": "u", "û": "u",
+        "ç": "c",
+    }
+    texte = texte.lower()
+    for accent, plain in remplacements.items():
+        texte = texte.replace(accent, plain)
+    return texte
 
 
 def construire_vtimezone() -> Timezone:
@@ -101,15 +122,26 @@ def filtrer_calendrier(donnees_ics: bytes) -> Calendar:
     cal_filtre.add_component(construire_vtimezone())
 
     nb_total = 0
+    nb_retires = 0
 
     for composant in cal_source.walk():
         if composant.name == "VEVENT":
             nb_total += 1
+            resume = str(composant.get("summary", ""))
+            resume_norm = normaliser(resume)
+
+            if any(mot in resume_norm for mot in
+                   (normaliser(m) for m in MOTS_A_EXCLURE)):
+                nb_retires += 1
+                continue  # on saute cet événement
+
             convertir_en_heure_locale(composant)
             simplifier_resume(composant)
             cal_filtre.add_component(composant)
 
-    print(f"Événements conservés : {nb_total}")
+    print(f"Événements analysés : {nb_total}")
+    print(f"Événements retirés (réservation de salles) : {nb_retires}")
+    print(f"Événements conservés : {nb_total - nb_retires}")
 
     return cal_filtre
 
