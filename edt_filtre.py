@@ -12,6 +12,7 @@ Utilisation :
 """
 
 import os
+import re
 import urllib.request
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -77,6 +78,32 @@ def convertir_en_heure_locale(composant):
             composant.add(champ, heure_locale)
 
 
+def extraire_champ(description: str, cle: str) -> str:
+    """Lit une ligne "Cle : valeur" dans le bloc DESCRIPTION d'HyperPlanning."""
+    m = re.search(rf"{cle}\s*:\s*(.+)", description)
+    return m.group(1).strip() if m else ""
+
+
+def simplifier_resume(composant):
+    """Remplace le titre (matière + enseignant + promotions à rallonge) par
+    "Matière - Type HH:MM" (ex: "Economie des plateformes - CM 14:30")."""
+    description = str(composant.get("description", ""))
+    matiere = extraire_champ(description, "Matière")
+    type_cours = extraire_champ(description, "Type")
+    if not matiere:
+        return  # format inattendu : on garde le titre d'origine
+
+    dtstart = composant.get("dtstart")
+    heure = dtstart.dt.strftime("%H:%M") if dtstart is not None else ""
+
+    nouveau_resume = f"{matiere} - {type_cours}" if type_cours else matiere
+    if heure:
+        nouveau_resume += f" {heure}"
+
+    del composant["summary"]
+    composant.add("summary", nouveau_resume)
+
+
 def telecharger_ics(url: str) -> bytes:
     with urllib.request.urlopen(url) as reponse:
         return reponse.read()
@@ -109,6 +136,7 @@ def filtrer_calendrier(donnees_ics: bytes) -> Calendar:
                 continue  # on saute cet événement
 
             convertir_en_heure_locale(composant)
+            simplifier_resume(composant)
             cal_filtre.add_component(composant)
 
     print(f"Événements analysés : {nb_total}")
